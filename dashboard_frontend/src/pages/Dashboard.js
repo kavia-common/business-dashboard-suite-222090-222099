@@ -23,10 +23,17 @@ export default function Dashboard() {
   /** Dashboard page renders the full layout (sidebar, top bar, content) and uses
    * local JSON/localStorage for sample metrics and series. Supports theme toggle
    * via TopBar and stores theme in localStorage.
+   * Also provides in-app tab navigation via sidebar with URL hash syncing.
    */
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem('theme');
     return saved || 'light';
+  });
+
+  const [selectedTab, setSelectedTab] = useState(() => {
+    const hash = (window.location.hash || '#overview').replace('#', '');
+    const allowed = ['overview', 'sales', 'revenue', 'expenses', 'settings'];
+    return allowed.includes(hash) ? hash : 'overview';
   });
 
   const [dataState, setDataState] = useState(() => {
@@ -66,6 +73,28 @@ export default function Dashboard() {
   useEffect(() => {
     localStorage.setItem('dashboard:data', JSON.stringify(dataState));
   }, [dataState]);
+
+  // Sync tab with URL hash and handle back/forward
+  useEffect(() => {
+    const onHashChange = () => {
+      const hash = (window.location.hash || '#overview').replace('#', '');
+      const allowed = ['overview', 'sales', 'revenue', 'expenses', 'settings'];
+      if (allowed.includes(hash)) setSelectedTab(hash);
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  const navigateTab = (tab) => {
+    setSelectedTab(tab);
+    // Update hash without full reload
+    const newHash = `#${tab}`;
+    if (window.location.hash !== newHash) {
+      window.history.pushState(null, '', newHash);
+      // Manually dispatch hashchange for consistency in environments
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    }
+  };
 
   const handleThemeToggle = () => {
     setTheme((t) => (t === 'light' ? 'dark' : 'light'));
@@ -145,59 +174,146 @@ export default function Dashboard() {
     ];
   }, [dataState]);
 
+  // Helpers to render tab-specific content
+  const renderOverview = () => (
+    <>
+      <section className="grid metrics-grid" aria-label="Key metrics">
+        <MetricCard
+          title="Sales"
+          value={dataState.metrics.sales.toLocaleString()}
+          accent="primary"
+          ariaLabel="Total sales"
+          icon="🛒"
+        />
+        <MetricCard
+          title="Revenue"
+          value={`$${dataState.metrics.revenue.toLocaleString()}`}
+          accent="success"
+          ariaLabel="Total revenue"
+          icon="💰"
+        />
+        <MetricCard
+          title="Expenses"
+          value={`$${dataState.metrics.expenses.toLocaleString()}`}
+          accent="neutral"
+          ariaLabel="Total expenses"
+          icon="📉"
+        />
+      </section>
+
+      <section className="grid charts-grid" aria-label="Charts">
+        <div className="card glass chart-card" role="region" aria-label="Monthly sales and expenses bar chart">
+          <div className="card-header">
+            <h3>Monthly Performance</h3>
+            <span className="badge">Bar</span>
+          </div>
+          <div className="chart-wrapper">
+            <Bar data={barData} options={barOptions} />
+          </div>
+        </div>
+
+        <div className="card glass chart-card" role="region" aria-label="Revenue by category pie chart">
+          <div className="card-header">
+            <h3>Revenue by Category</h3>
+            <span className="badge">Pie</span>
+          </div>
+          <div className="chart-wrapper">
+            <Pie data={pieData} />
+          </div>
+        </div>
+      </section>
+
+      <QuickInsights items={insights} />
+    </>
+  );
+
+  const renderSales = () => (
+    <section className="card glass insights" aria-label="Sales section">
+      <div className="card-header">
+        <h3>Sales</h3>
+      </div>
+      <div>
+        <p>Recent sales highlight a steady upward trend in monthly volume.</p>
+        <div className="chart-wrapper" style={{ height: 220 }}>
+          <Bar data={{
+            labels: dataState.monthly.map(m => m.month),
+            datasets: [{
+              label: 'Sales',
+              data: dataState.monthly.map(m => m.sales),
+              backgroundColor: 'rgba(59, 130, 246, 0.6)',
+              borderRadius: 8,
+            }]
+          }} options={barOptions} />
+        </div>
+      </div>
+    </section>
+  );
+
+  const renderRevenue = () => (
+    <section className="card glass insights" aria-label="Revenue section">
+      <div className="card-header">
+        <h3>Revenue</h3>
+      </div>
+      <div>
+        <p>Revenue composition by category.</p>
+        <div className="chart-wrapper" style={{ height: 220 }}>
+          <Pie data={pieData} />
+        </div>
+      </div>
+    </section>
+  );
+
+  const renderExpenses = () => (
+    <section className="card glass insights" aria-label="Expenses section">
+      <div className="card-header">
+        <h3>Expenses</h3>
+      </div>
+      <div className="insights-grid">
+        <div className="insight down">
+          <div className="insight-title">Monthly Expenses</div>
+          <div className="insight-value">${dataState.metrics.expenses.toLocaleString()}</div>
+        </div>
+        <div className="insight flat">
+          <div className="insight-title">Expense Categories</div>
+          <div className="insight-value">Ops, Marketing, R&D</div>
+        </div>
+      </div>
+    </section>
+  );
+
+  const renderSettings = () => (
+    <section className="card glass insights" aria-label="Settings section">
+      <div className="card-header">
+        <h3>Settings</h3>
+      </div>
+      <div>
+        <p>Theme: {theme}</p>
+        <button className="btn-theme" onClick={handleThemeToggle}>
+          Toggle Theme
+        </button>
+      </div>
+    </section>
+  );
+
+  const renderTabContent = () => {
+    switch (selectedTab) {
+      case 'sales': return renderSales();
+      case 'revenue': return renderRevenue();
+      case 'expenses': return renderExpenses();
+      case 'settings': return renderSettings();
+      case 'overview':
+      default:
+        return renderOverview();
+    }
+  };
+
   return (
     <div className="dash-root">
-      <Sidebar />
+      <Sidebar currentTab={selectedTab} onNavigate={navigateTab} />
       <div className="dash-main">
         <TopBar theme={theme} onToggleTheme={handleThemeToggle} />
         <main className="dash-content" role="main">
-          <section className="grid metrics-grid" aria-label="Key metrics">
-            <MetricCard
-              title="Sales"
-              value={dataState.metrics.sales.toLocaleString()}
-              accent="primary"
-              ariaLabel="Total sales"
-              icon="🛒"
-            />
-            <MetricCard
-              title="Revenue"
-              value={`$${dataState.metrics.revenue.toLocaleString()}`}
-              accent="success"
-              ariaLabel="Total revenue"
-              icon="💰"
-            />
-            <MetricCard
-              title="Expenses"
-              value={`$${dataState.metrics.expenses.toLocaleString()}`}
-              accent="neutral"
-              ariaLabel="Total expenses"
-              icon="📉"
-            />
-          </section>
-
-          <section className="grid charts-grid" aria-label="Charts">
-            <div className="card glass chart-card" role="region" aria-label="Monthly sales and expenses bar chart">
-              <div className="card-header">
-                <h3>Monthly Performance</h3>
-                <span className="badge">Bar</span>
-              </div>
-              <div className="chart-wrapper">
-                <Bar data={barData} options={barOptions} />
-              </div>
-            </div>
-
-            <div className="card glass chart-card" role="region" aria-label="Revenue by category pie chart">
-              <div className="card-header">
-                <h3>Revenue by Category</h3>
-                <span className="badge">Pie</span>
-              </div>
-              <div className="chart-wrapper">
-                <Pie data={pieData} />
-              </div>
-            </div>
-          </section>
-
-          <QuickInsights items={insights} />
+          {renderTabContent()}
         </main>
       </div>
     </div>
